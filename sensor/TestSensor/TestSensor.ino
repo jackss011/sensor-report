@@ -1,5 +1,6 @@
 #include <SPI.h>
 #include <WiFiNINA.h>
+#include <ctype.h>
 #include "secrets.h"
 
 #define HOSTNAME "Arduino Nano 33 IoT"
@@ -19,7 +20,6 @@ char pass[] = SECRET_PASS;
 
 int status = WL_IDLE_STATUS;
 WiFiClient client;
-
 IPAddress server_ip(192, 168, 0, 119);
 int server_port = 3000;
 
@@ -28,7 +28,7 @@ int server_port = 3000;
 void serial_setup() {
   #if defined(DEBUG)
     Serial.begin(9600);
-//    while (!Serial) delay(1000);
+    while (!Serial) delay(1000);
   #endif
 }
 
@@ -59,8 +59,27 @@ void wifi_connect() {
 }
 
 
+// ============== HELPERS ==============
+
+char* skip_spaces(char *str) {
+  char *cursor = str;
+  while(*cursor != '\0' && isspace(*cursor)) cursor++;
+  return cursor;
+}
+
+
+char* move_to_space(char *str) {
+  char *cursor = str;
+  while(*cursor != '\0' && !isspace(*cursor)) cursor++;
+  return cursor;
+}
+
+
+
+// =========== SEND =============
+
 // send data to server
-bool beginSend(char *mode, char *location) {
+bool send_begin(char *mode, char *location) {
   // check wifi status
   if(WiFi.status() != WL_CONNECTED) {
     wifi_connect();
@@ -87,9 +106,79 @@ bool beginSend(char *mode, char *location) {
 }
 
 
-void endSend() {
+void send_end() {
   client.print("\n#");
 }
+
+
+// ============= RECEIVE ==============
+
+#define RECEIVE_BUFF_SIZE 1000
+char receive_buff[RECEIVE_BUFF_SIZE];
+int receive_index;
+char r;
+bool again;
+
+void receive() {
+  receive_index = 0;
+  again = true;
+  
+  while(client.available() && again) {
+    r = client.read();
+
+    if(receive_index >= RECEIVE_BUFF_SIZE) {
+      PRINT_DEBUG("Receive buffer overflow");
+      return;
+    }
+    
+    if(r != '#') {
+      receive_buff[receive_index] = r;
+    } else {
+      receive_buff[receive_index] = '\0';
+      on_data();
+      again = false;
+    }
+
+    receive_index++;
+  }
+}
+
+
+char *mode;
+char *location;
+
+void on_data() {
+  mode = NULL;
+  location = NULL;
+
+  // skip inital spaces
+  char *cursor = skip_spaces(receive_buff);
+  if(*cursor == '\0') return; // invalid request (only spaces)
+  
+  mode = cursor;
+
+  // move to mode end
+  cursor = move_to_space(cursor);
+  if(*cursor == '\0') return; // invalid request (no location)
+
+  // terminate mode
+  *cursor = '\0';
+  cursor++;
+
+  cursor = skip_spaces(cursor);
+  location = cursor;
+
+  // move to location end and terminate it
+  cursor = move_to_space(cursor);
+  *cursor = '\0';
+  
+  PRINT_DEBUG(mode);
+  PRINT_DEBUG(location);
+}
+
+
+
+// =========== SETUP-LOOP ============
 
 
 void setup() {
@@ -100,16 +189,13 @@ void setup() {
 }
 
 
-
-int num = 0;
-
 void loop() {
-
-  if(beginSend("P", "/report/aa")) {
+  if(send_begin("P", "/report/aa")) {
     client.println("{\"temp\":\"23\"}");
-    endSend();
+    send_end();
   }
 
-  
-  delay(10000);
+  delay(1000);
+  receive();
+  delay(9000);
 }

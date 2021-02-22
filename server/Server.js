@@ -10,7 +10,8 @@ class App {
     this.routes = []
 
     this.server = net.createServer(socket => this._onNewSocket(socket))
-    this.server.on('error', err => this._serverError(err) )
+    this.server.on('close', () => {}) //TODO: implement
+    this.server.on('error', err => this._serverError(err) ) //TODO: implement
   }
 
   _serverError(err) {
@@ -68,20 +69,36 @@ class App {
 
   _onHandleData(handle, data) {
     const req = new Request().parse(data).from(handle)
+    const res = new Response().for(req)
 
     for(let r of this.routes) {
+
+      // TODO: move to Route class
       const locationMatch = r.location.matches(req.location)
       const routeMatch = r.mode.toUpperCase() === req.mode.toUpperCase() && locationMatch.match
 
       if(routeMatch) {
-        r.callback(req.withParams(locationMatch.params))
+        req.withParams(locationMatch.params)
+
+        r.callback(req, res)
+        this._processResponse(handle, res)
+
         break
       }
     }
   }
 
 
+  _processResponse(handle, res) {
+    if(!res.toSend) return
+
+    const data = res.pack()
+    handle.socket.write(data, 'utf-8')
+  }
+
+
   route(mode, location, callback) {
+    // TODO: use location matcher here
     const r = { mode: mode, location: new Location(location), callback }
     this.routes = [r, ...this.routes]
   }
@@ -89,6 +106,43 @@ class App {
 
   listen(port, callback) {
     this.server.listen(port, callback)
+  }
+
+
+  stop(callback) {
+    this.server.close(callback)
+  }
+}
+
+
+class Response {
+  constructor() {
+    this.req = null
+    this.toSend = null
+  }
+
+  for(req) {
+    this.req = req
+    return this
+  }
+
+  send(mode, location, content) {
+    this.toSend = { mode, location, content }
+  }
+
+  pack() {
+    const m = this.toSend.mode.toUpperCase() || ''
+    const l = this.toSend.location || ''
+    const c = this.toSend.content || ''
+
+    return `${m} ${l}\n${c}\n${TERMINATOR}`
+  }
+}
+
+
+// TODO: implement
+class Route {
+  constructor() {
   }
 }
 
@@ -109,23 +163,23 @@ class Request {
     return this
   }
 
-  parse(sentence) {
-    sentence.replace('\r', '')
+  parse(data) {
+    data.replace('\r', '')
 
-    const spaceIndex = sentence.indexOf(' ')
+    const spaceIndex = data.indexOf(' ')
     if(spaceIndex < 0) return false
 
-    let mode = sentence.slice(0, spaceIndex)
-    const newLineIndex = sentence.indexOf('\n')
+    let mode = data.slice(0, spaceIndex)
+    const newLineIndex = data.indexOf('\n')
 
     let content = ''
     let location = ''
 
     if(newLineIndex > 0) {
-      location = sentence.slice(spaceIndex, newLineIndex)
-      content = sentence.slice(newLineIndex)
+      location = data.slice(spaceIndex, newLineIndex)
+      content = data.slice(newLineIndex)
     } else {
-      location = sentence.slice(spaceIndex)
+      location = data.slice(spaceIndex)
     }
 
     mode = mode.trim().toUpperCase()
@@ -139,7 +193,7 @@ class Request {
       return false
 
     this.mode = mode
-    this.location = new Location(location)
+    this.location = new Location(location) //TODO: use string here
     this.raw = content
 
     return this
@@ -159,6 +213,7 @@ class Request {
 }
 
 
+// TODO: transform in LocationMatcher
 class Location {
   constructor(str) {
     this.bits = []
