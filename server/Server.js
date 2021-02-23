@@ -72,13 +72,10 @@ class App {
     const res = new Response().for(req)
 
     for(let r of this.routes) {
+      const {match, params} = r.matches(req)
 
-      // TODO: move to Route class
-      const locationMatch = r.location.matches(req.location)
-      const routeMatch = r.mode.toUpperCase() === req.mode.toUpperCase() && locationMatch.match
-
-      if(routeMatch) {
-        req.withParams(locationMatch.params)
+      if(match) {
+        req.withParams(params)
 
         r.callback(req, res)
         this._processResponse(handle, res)
@@ -98,8 +95,7 @@ class App {
 
 
   route(mode, location, callback) {
-    // TODO: use location matcher here
-    const r = { mode: mode, location: new Location(location), callback }
+    const r = new Route(mode, location, callback)
     this.routes = [r, ...this.routes]
   }
 
@@ -140,9 +136,19 @@ class Response {
 }
 
 
-// TODO: implement
 class Route {
-  constructor() {
+  constructor(mode, location, callback) {
+    this.mode = mode
+    this.locationMatcher = new LocationMatcher(location)
+    this.callback = callback
+  }
+
+  matches(req) {
+    const locationMatchRes = this.locationMatcher.matches(req.location)
+    const modeMatch = this.mode.toUpperCase() === req.mode.toUpperCase()
+    const match = modeMatch && locationMatchRes.match
+
+    return { match, params: locationMatchRes.params}
   }
 }
 
@@ -193,7 +199,7 @@ class Request {
       return false
 
     this.mode = mode
-    this.location = new Location(location) //TODO: use string here
+    this.location = location
     this.raw = content
 
     return this
@@ -213,26 +219,27 @@ class Request {
 }
 
 
-// TODO: transform in LocationMatcher
-class Location {
+class LocationMatcher {
   constructor(str) {
     this.bits = []
 
-    this.bits = str.split('/').filter(s => s.length > 0)
+    this.bits = LocationMatcher.split(str)
   }
 
-  matches(other) {
-    if(this.bits.length === 0 && other.bits.length === 0)
+  matches(str) {
+    const strBits = LocationMatcher.split(str)
+
+    if(this.bits.length === 0 && strBits.length === 0)
       return { match: true, params: {} }
 
-    if(this.bits.length !== other.bits.length)
+    if(this.bits.length !== strBits.length)
       return { match: false, params: {} }
 
     const params = {}
 
     for(let i = 0; i < this.bits.length; i++) {
       const myB = this.bits[i]
-      const otherB = other.bits[i]
+      const otherB = strBits[i]
 
       if(myB.startsWith(':')) {
         const paramName = myB.replace(':', '')
@@ -246,6 +253,8 @@ class Location {
 
     return { match: true, params }
   }
+
+  static split(str) { return str.split('/').filter(s => s.length > 0) }
 }
 
 
